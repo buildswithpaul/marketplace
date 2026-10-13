@@ -13,6 +13,7 @@ PATH.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import tempfile
 import tomllib
@@ -55,7 +56,18 @@ def frappe_branch_for(frappe_core: str) -> str:
             f"frappe_core {frappe_core!r} declares no lower bound, so there is no "
             "Frappe version to validate against — declare one, e.g. '>=15.0.0,<16.0.0'"
         )
-    return f"version-{max(floors).major}"
+    branch = f"version-{max(floors).major}"
+    # The major still in development has no version branch yet; it lives on develop.
+    if not _frappe_has_branch(branch):
+        return "develop"
+    return branch
+
+
+def _frappe_has_branch(branch: str) -> bool:
+    result = subprocess.run(
+        ["git", "ls-remote", "--exit-code", "--heads", FRAPPE_REPO, branch], capture_output=True
+    )
+    return result.returncode == 0
 
 
 def frappe_requires_python(frappe_path: Path) -> str:

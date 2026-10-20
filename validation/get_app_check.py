@@ -16,6 +16,8 @@ from __future__ import annotations
 import sys
 import tempfile
 import tomllib
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from packaging.specifiers import InvalidSpecifier, Specifier, SpecifierSet
@@ -29,9 +31,12 @@ from pilot.core.app import App
 from pilot.core.app.validator import Validator as InstallValidator
 from pilot.core.bench import Bench
 from pilot.exceptions import AppValidationError, BenchError
+from pilot.integrations.git.base import GitProviderError
+from pilot.integrations.git.github import parse_github_owner_repo
 from pilot.managers.environment import PythonEnvManager
 
 FRAPPE_REPO = "https://github.com/frappe/frappe"
+ASSETS_SETUP_GUIDE = "https://github.com/frappe/pilot/blob/develop/docs/prebuilt-assets.md"
 
 
 def frappe_branch_for(frappe_core: str) -> str:
@@ -90,6 +95,7 @@ class GetAppValidator(Validator):
             return
 
         self._reject_untruthful_metadata(frappe_core)
+        self._require_prebuilt_assets()
         try:
             self._install_and_check(frappe_core)
         except AppValidationError as exc:
@@ -119,6 +125,31 @@ class GetAppValidator(Validator):
         in_repo = toml.get("tool", {}).get("bench", {}).get("frappe-dependencies", {}).get("frappe")
         if in_repo and in_repo != frappe_core:
             self.fail(f"advertised frappe_core {frappe_core!r} but the commit declares {in_repo!r}")
+
+    def _require_prebuilt_assets(self) -> None:
+        """Benches download the assets the app's CI published for the commit and never build them."""
+        try:
+            owner, repository = parse_github_owner_repo(self.target["repo"])
+        except GitProviderError:
+            self.fail("Prebuilt assets are published on GitHub releases, so the repo must be on GitHub")
+            return
+
+        branch, commit = self.target["branch"], self.target["commit"]
+        tag = f"assets-{branch.replace('/', '-')}"
+        url = f"https://github.com/{owner}/{repository}/releases/download/{tag}/{self.target['name']}-{commit}.tar.gz.sha256"
+        try:
+            urllib.request.urlopen(urllib.request.Request(url, method="HEAD"), timeout=30).close()
+        except urllib.error.HTTPError:
+            self.fail(
+                f"No prebuilt assets published for {branch}@{commit[:8]}. Run Pilot's app-assets "
+                f"workflow on pushes to {branch} (setup guide: {ASSETS_SETUP_GUIDE}) and open "
+                "the PR once it has finished"
+            )
+        except urllib.error.URLError as exc:
+            self.fail(f"Could not check the prebuilt assets at {url} ({exc.reason})")
+        # A timeout while waiting for the response is raised as is, not wrapped in URLError.
+        except TimeoutError:
+            self.fail(f"Timed out checking the prebuilt assets at {url}; run /rereview to try again")
 
     def _dynamic_version(self, project_name: str) -> str:
         """__version__ from <module>/__init__.py, for apps using dynamic versioning."""

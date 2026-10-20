@@ -158,7 +158,12 @@ order:
    [`bench get-app`](https://github.com/frappe/pilot) itself performs. Catches
    broken repo structure, syntax errors, undeclared `[tool.bench.frappe-dependencies]`/`required_apps`
    mismatches, and missing imports/dependencies that only show up once the
-   app is actually installed.
+   app is actually installed. It also requires the prebuilt assets for the
+   release's `branch` and `commit`, which benches download instead of
+   building. Publish them with Pilot's `app-assets.yml` workflow on every
+   branch you release from (see
+   [Pilot's setup guide](https://github.com/frappe/pilot/blob/develop/docs/prebuilt-assets.md)),
+   and open the PR after the workflow run for that commit has finished.
 
 ### Reading the results
 
